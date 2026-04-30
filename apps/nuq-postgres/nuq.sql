@@ -152,16 +152,18 @@ SELECT cron.schedule('nuq_reindex_queue_scrape_backlog_group_mode',     '40 5 * 
 SELECT cron.schedule('nuq_reindex_queue_scrape_backlog_group_id',       '0 6 * * *',  $$REINDEX INDEX CONCURRENTLY nuq.idx_queue_scrape_backlog_group_id;$$);
 SELECT cron.schedule('nuq_reindex_queue_scrape_backlog_times_out_at',   '20 6 * * *', $$REINDEX INDEX CONCURRENTLY nuq.nuq_queue_scrape_backlog_times_out_at_idx;$$);
 
--- Watchdog: cancel any nuq REINDEX CONCURRENTLY that has been running > 25 min.
+-- Watchdog: cancel any nuq REINDEX CONCURRENTLY that has been running > 18 min.
 -- Acts as the safety net since statement_timeout cannot be set inline with
--- REINDEX CONCURRENTLY. 25 min keeps every job comfortably under the next
--- slot's 20-min cadence.
-SELECT cron.schedule('nuq_maintenance_watchdog', '*/5 * * * *', $$
+-- REINDEX CONCURRENTLY. Slots are 20 min apart, so the watchdog must run
+-- frequently enough that a stuck job is killed before the next slot fires.
+-- Cadence (1 min) + threshold (18 min) caps actual reindex runtime at ~19 min,
+-- strictly under the 20 min cadence.
+SELECT cron.schedule('nuq_maintenance_watchdog', '* * * * *', $$
   SELECT pg_cancel_backend(pid)
   FROM pg_stat_activity
   WHERE backend_type = 'client backend'
     AND query ILIKE 'REINDEX INDEX CONCURRENTLY nuq.%'
-    AND now() - query_start > interval '25 minutes';
+    AND now() - query_start > interval '18 minutes';
 $$);
 
 CREATE TABLE IF NOT EXISTS nuq.queue_crawl_finished (
