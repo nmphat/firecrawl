@@ -237,7 +237,10 @@ export async function updateMonitorController(
       }),
     );
   }
-  if (monitor.status === "paused") {
+  if (
+    monitor.status === "paused" &&
+    (input.status === "paused" || input.schedule || input.targets)
+  ) {
     interestTracking.push(
       trackMonitorDeactivatedInterest({
         monitor,
