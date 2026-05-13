@@ -34,6 +34,7 @@ import {
 import { withSpan, setSpanAttributes } from "../../../../lib/otel-tracer";
 import { scrapePDFWithRunPodMU } from "./runpodMU";
 import { reconcilePageCountWithFirePdf, scrapePDFWithFirePDF } from "./firePDF";
+import { scrapePDFWithFirePDFAsync } from "./firePDFAsync";
 import { scrapePDFWithParsePDF } from "./pdfParse";
 import { captureExceptionWithZdrCheck } from "../../../../services/sentry";
 import { isPdfBuffer, PDF_SNIFF_WINDOW } from "./pdfUtils";
@@ -399,12 +400,23 @@ export async function scrapePDF(meta: Meta): Promise<EngineScrapeResult> {
           Math.random() * 100 < config.FIRE_PDF_PERCENT);
 
       if (useFirePDF) {
+        // ZDR traffic must stay on sync /ocr — fire-pdf's /jobs handler
+        // requires zdr:false and we don't want PDF bytes parked in GCS
+        // for ZDR-flagged requests.
+        const useAsync =
+          !!meta.options.__experimental_firePdfAsync &&
+          !meta.internalOptions.zeroDataRetention;
         try {
-          result = await scrapePDFWithFirePDF(
+          const firePdfCall = useAsync
+            ? scrapePDFWithFirePDFAsync
+            : scrapePDFWithFirePDF;
+          result = await firePdfCall(
             {
               ...meta,
               logger: meta.logger.child({
-                method: "scrapePDF/firePDF",
+                method: useAsync
+                  ? "scrapePDF/firePDFAsync"
+                  : "scrapePDF/firePDF",
               }),
             },
             base64Content,

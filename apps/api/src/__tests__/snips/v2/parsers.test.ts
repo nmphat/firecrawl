@@ -221,6 +221,33 @@ describeIf(ALLOW_TEST_SUITE_WEBSITE)("Parsers parameter tests", () => {
     );
   });
 
+  // The async path silently falls back to sync /ocr on any error (404,
+  // 503, network, terminal failure, …), so this test verifies the
+  // user-visible contract: flag=true produces an identically-shaped
+  // response to the existing sync path. Whether the request actually
+  // traversed /jobs vs. /ocr depends on staging — both outcomes
+  // satisfy the acceptance criteria.
+  describe("__experimental_firePdfAsync (opt-in async fire-pdf)", () => {
+    it.concurrent(
+      "with mode 'ocr' returns markdown identical-shape to sync",
+      async () => {
+        const response = await scrape(
+          {
+            url: pdfUrl,
+            parsers: [{ type: "pdf", mode: "ocr" }],
+            __experimental_firePdfAsync: true,
+          },
+          identity,
+        );
+
+        expect(response.markdown).toBeDefined();
+        expect(response.markdown).toContain("PDF Test File");
+        expect(response.metadata.numPages).toBeGreaterThan(0);
+      },
+      scrapeTimeout * 2,
+    );
+  });
+
   describe("Default behavior", () => {
     it.concurrent(
       "parses PDF by default when parsers not specified",

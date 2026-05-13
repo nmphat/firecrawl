@@ -127,6 +127,38 @@ describe("/v2/parse", () => {
       },
       scrapeTimeout * 2,
     );
+
+    // The flag travels via baseScrapeOptions → parse request body →
+    // scrapeOptions → meta.options on the worker side, same path
+    // __forceFirePDF uses. Async path silently falls back to sync /ocr
+    // on any error, so an identically-shaped response is the contract
+    // we assert here.
+    it(
+      "accepts __experimental_firePdfAsync on parse uploads",
+      async () => {
+        expect(pdfFixture).not.toBeNull();
+
+        const result = await parse(
+          {
+            options: {
+              formats: ["markdown"],
+              parsers: [{ type: "pdf", mode: "ocr" }],
+              __experimental_firePdfAsync: true,
+            },
+            file: {
+              content: pdfFixture!,
+              filename: "upload.pdf",
+              contentType: "application/pdf",
+            },
+          },
+          identity,
+        );
+
+        expect(result.markdown).toContain("PDF Test File");
+        expect(result.metadata.numPages).toBeGreaterThan(0);
+      },
+      scrapeTimeout * 2,
+    );
   });
 
   it(

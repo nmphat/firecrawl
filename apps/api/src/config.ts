@@ -174,6 +174,7 @@ const configSchema = z.object({
   FIRE_PDF_PERCENT: z.coerce.number().min(0).max(100).default(10),
   FIRE_PDF_BASE_URL: z.string().optional(),
   FIRE_PDF_API_KEY: z.string().optional(),
+  GCS_FIRE_PDF_BUCKET_NAME: z.string().default("firecrawl-pdf-pipeline"),
 
   // RunPod
   RUNPOD_MU_API_KEY: z.string().optional(),
