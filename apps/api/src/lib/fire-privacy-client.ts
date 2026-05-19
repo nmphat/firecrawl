@@ -329,6 +329,22 @@ export async function redactText(opts: RedactOptions): Promise<PIIBlock> {
     replaceStyle: DEFAULTS.replaceStyle,
   };
 
+  // Fire-privacy is an optional service. If it's not configured for this
+  // deployment, surface a clear `failed/error` block rather than making
+  // a request to `undefined/redact` and letting it fail opaquely.
+  if (!config.FIRE_PRIVACY_URL) {
+    logger?.warn("redactPII requested but FIRE_PRIVACY_URL is not configured", {
+      url: opts.url,
+    });
+    return {
+      status: "failed",
+      reason: "error",
+      redactedMarkdown: null,
+      spans: [],
+      counts: {},
+    };
+  }
+
   // Empty/whitespace input is a no-op locally — saves a round trip and matches
   // fire-privacy's own "skipped" semantics. We pass the original text through
   // as `redactedMarkdown` since there's nothing to remove.

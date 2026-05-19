@@ -280,9 +280,7 @@ const configSchema = z.object({
   AVGRAB_SERVICE_URL: z.string().optional(),
 
   // PII Redaction (fire-privacy)
-  FIRE_PRIVACY_URL: z
-    .string()
-    .default("http://fire-privacy-service.fire-privacy.svc.cluster.local:8000"),
+  FIRE_PRIVACY_URL: z.string().optional(),
   FIRE_PRIVACY_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
 
   NUQ_PREFETCH_WORKER_HEARTBEAT_URL: z.string().optional(),

@@ -10,7 +10,7 @@ type Handler = (
 
 let server: http.Server;
 let baseUrl: string;
-let originalUrl: string;
+let originalUrl: string | undefined;
 let handler: Handler = (_req, res) => {
   res.statusCode = 500;
   res.end();
@@ -204,6 +204,26 @@ describe("redactText", () => {
     config.FIRE_PRIVACY_URL = "http://127.0.0.1:1";
     try {
       const out = await redactText({ text: "input", timeoutMs: 500 });
+      expect(out.status).toBe("failed");
+      expect(out.reason).toBe("error");
+      expect(out.redactedMarkdown).toBeNull();
+    } finally {
+      config.FIRE_PRIVACY_URL = originalLocalUrl;
+    }
+  });
+
+  it("returns failed/error without an HTTP call when FIRE_PRIVACY_URL is unset", async () => {
+    let called = false;
+    handler = (_req, res) => {
+      called = true;
+      res.statusCode = 200;
+      res.end();
+    };
+    const originalLocalUrl = config.FIRE_PRIVACY_URL;
+    config.FIRE_PRIVACY_URL = undefined;
+    try {
+      const out = await redactText({ text: "input" });
+      expect(called).toBe(false);
       expect(out.status).toBe("failed");
       expect(out.reason).toBe("error");
       expect(out.redactedMarkdown).toBeNull();
