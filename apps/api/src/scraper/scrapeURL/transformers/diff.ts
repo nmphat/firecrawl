@@ -265,7 +265,6 @@ export async function deriveDiff(
             (document.warning ? ` ${document.warning}` : "");
         }
       }
-
     } else if (!res.error) {
       document.changeTracking = {
         previousScrapeAt: null,
