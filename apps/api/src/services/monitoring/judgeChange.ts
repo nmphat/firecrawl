@@ -90,8 +90,65 @@ function truncate(s: string, cap: number): string {
 }
 
 const JUDGE_MODEL_NAME = "gemini-2.5-flash-lite";
-const JUDGE_TIMEOUT_MS = 15_000;
+const JUDGE_ATTEMPT_TIMEOUT_MS = 8_000;
+const JUDGE_MAX_ATTEMPTS = 3;
+const JUDGE_BACKOFF_MS = [300, 800];
 const judgeModel = google(JUDGE_MODEL_NAME);
+
+function isTransientJudgeError(error: unknown): boolean {
+  if (!error) return false;
+  const err = error as { name?: string; statusCode?: number; status?: number; message?: string };
+  if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+  const code = err.statusCode ?? err.status;
+  if (typeof code === "number" && (code === 408 || code === 425 || code === 429 || code >= 500)) {
+    return true;
+  }
+  const msg = (err.message ?? "").toLowerCase();
+  return (
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("network") ||
+    msg.includes("503") ||
+    msg.includes("rate limit")
+  );
+}
+
+async function callGemini(args: {
+  userBlock: string;
+}): Promise<{ text: string }> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= JUDGE_MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      JUDGE_ATTEMPT_TIMEOUT_MS,
+    );
+    try {
+      const result = await generateText({
+        model: judgeModel,
+        system: SYSTEM_PROMPT,
+        prompt: args.userBlock,
+        temperature: 0,
+        abortSignal: controller.signal,
+      });
+      return { text: result.text?.trim() ?? "" };
+    } catch (error) {
+      lastError = error;
+      if (attempt >= JUDGE_MAX_ATTEMPTS || !isTransientJudgeError(error)) {
+        throw error;
+      }
+      const backoff = JUDGE_BACKOFF_MS[attempt - 1] ?? 800;
+      const jitter = Math.floor(Math.random() * backoff);
+      await new Promise(resolve => setTimeout(resolve, backoff + jitter));
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  throw lastError;
+}
 
 export async function judgeChange(args: JudgeChangeArgs): Promise<JudgmentResult> {
   const { logger, goal, extractionPrompt, jsonDiff, markdownDiff } = args;
@@ -132,18 +189,8 @@ export async function judgeChange(args: JudgeChangeArgs): Promise<JudgmentResult
   }
   const userBlock = parts.join("\n\n");
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), JUDGE_TIMEOUT_MS);
   try {
-    const result = await generateText({
-      model: judgeModel,
-      system: SYSTEM_PROMPT,
-      prompt: userBlock,
-      temperature: 0,
-      abortSignal: controller.signal,
-    });
-
-    const text = result.text?.trim() ?? "";
+    const { text } = await callGemini({ userBlock });
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
       logger.warn("Judge returned unparseable response", {
@@ -190,17 +237,15 @@ export async function judgeChange(args: JudgeChangeArgs): Promise<JudgmentResult
       };
     }
   } catch (error) {
-    const aborted = controller.signal.aborted;
-    logger.error("Judge call failed", { error, aborted });
+    const transient = isTransientJudgeError(error);
+    logger.error("Judge call failed", { error, transient });
     return {
       meaningful: true,
       confidence: "low",
-      reason: aborted
-        ? `Judge call timed out after ${JUDGE_TIMEOUT_MS}ms — defaulting to meaningful.`
+      reason: transient
+        ? `Judge call timed out or upstream error after ${JUDGE_MAX_ATTEMPTS} attempts — defaulting to meaningful.`
         : `Judge call failed — defaulting to meaningful. (${error instanceof Error ? error.message : "unknown"})`,
       fields: [],
     };
-  } finally {
-    clearTimeout(timeoutId);
   }
 }

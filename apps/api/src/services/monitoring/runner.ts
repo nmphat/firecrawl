@@ -611,12 +611,14 @@ async function sendNotifications(params: {
     }
   }
 
+  // Pass the full filtered page list so the judgment-gating logic in
+  // sendMonitoringEmailSummary sees every changed page. The email
+  // renderer caps the list for display on its own.
   const emailStatus = await sendMonitoringEmailSummary({
     monitor: params.monitor,
     check: params.check,
     pages: params.pages
       .filter(page => page.status !== "same")
-      .slice(0, 25)
       .map(page => ({
         url: page.url,
         status: page.status,

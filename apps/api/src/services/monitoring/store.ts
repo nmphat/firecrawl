@@ -60,6 +60,14 @@ function throwIfError(error: any, message: string): void {
   }
 }
 
+// Trim whitespace; treat empty/all-whitespace as "no goal" so users who
+// leave the field blank aren't quietly opted into AI judging.
+function normalizeGoal(goal: string | undefined | null): string | null {
+  if (goal == null) return null;
+  const trimmed = goal.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export async function createMonitor(params: {
   teamId: string;
   input: CreateMonitorRequest;
@@ -71,22 +79,28 @@ export async function createMonitor(params: {
   const estimatedCreditsPerMonth =
     estimatedCreditsPerRun * estimateRunsPerMonth(params.intervalMs);
 
+  // Only include `goal` in the insert when the caller provided one. This
+  // keeps create-monitor working in environments where the matching DB
+  // migration hasn't landed yet — the schema lives in a separate repo.
+  const insert: Record<string, unknown> = {
+    id: uuidv7(),
+    team_id: params.teamId,
+    name: params.input.name,
+    schedule_cron: params.input.schedule.cron,
+    schedule_timezone: params.input.schedule.timezone,
+    next_run_at: params.nextRunAt.toISOString(),
+    retention_days: params.input.retentionDays,
+    estimated_credits_per_month: estimatedCreditsPerMonth,
+    targets,
+    webhook: params.input.webhook ?? null,
+    notification: params.input.notification ?? null,
+  };
+  if (params.input.goal !== undefined) {
+    insert.goal = normalizeGoal(params.input.goal);
+  }
   const { data, error } = await supabase_service
     .from("monitors")
-    .insert({
-      id: uuidv7(),
-      team_id: params.teamId,
-      name: params.input.name,
-      schedule_cron: params.input.schedule.cron,
-      schedule_timezone: params.input.schedule.timezone,
-      next_run_at: params.nextRunAt.toISOString(),
-      retention_days: params.input.retentionDays,
-      estimated_credits_per_month: estimatedCreditsPerMonth,
-      targets,
-      webhook: params.input.webhook ?? null,
-      notification: params.input.notification ?? null,
-      goal: params.input.goal ?? null,
-    })
+    .insert(insert)
     .select("*")
     .single();
 
@@ -165,7 +179,7 @@ export async function updateMonitor(params: {
     patch.retention_days = params.input.retentionDays;
   }
   if (params.input.goal !== undefined) {
-    patch.goal = params.input.goal ?? null;
+    patch.goal = normalizeGoal(params.input.goal);
   }
   if (params.input.targets !== undefined) {
     const targets = ensureTargetIds(params.input.targets);
