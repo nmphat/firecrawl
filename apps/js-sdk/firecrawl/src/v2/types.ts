@@ -762,6 +762,8 @@ export interface CreateMonitorRequest {
   notification?: MonitorNotification;
   targets: MonitorTarget[];
   retentionDays?: number;
+  goal?: string;
+  judgeEnabled?: boolean;
 }
 
 export interface UpdateMonitorRequest {
@@ -772,6 +774,8 @@ export interface UpdateMonitorRequest {
   notification?: MonitorNotification | null;
   targets?: MonitorTarget[];
   retentionDays?: number;
+  goal?: string | null;
+  judgeEnabled?: boolean;
 }
 
 export interface MonitorSummary {
@@ -797,8 +801,22 @@ export interface Monitor {
   retentionDays: number;
   estimatedCreditsPerMonth?: number | null;
   lastCheckSummary?: MonitorSummary | null;
+  goal?: string | null;
+  judgeEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MonitorPageJudgment {
+  meaningful: boolean;
+  confidence: "high" | "medium" | "low";
+  reason: string;
+  meaningfulChanges: Array<{
+    type: "added" | "removed" | "changed";
+    before: string | null;
+    after: string | null;
+    reason: string;
+  }>;
 }
 
 export interface MonitorCheck {
@@ -874,6 +892,7 @@ export interface MonitorCheckPage {
   metadata?: unknown;
   diff?: MonitorPageDiff | null;
   snapshot?: MonitorPageSnapshot | null;
+  judgment?: MonitorPageJudgment | null;
   createdAt: string;
 }
 
