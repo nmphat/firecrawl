@@ -8,7 +8,8 @@ import {
   SearchFeedbackResponse,
   searchFeedbackSchema,
 } from "./types";
-import { recordEndpointFeedback, toSearchFeedbackInput } from "./feedback";
+import { recordEndpointFeedback } from "./feedback/record";
+import { toSearchFeedbackInput } from "./feedback/request-input";
 
 export async function searchFeedbackController(
   req: RequestWithAuth<
