@@ -45,6 +45,20 @@ export type LockCreditsParams = {
   properties?: Record<string, unknown>;
 };
 
+/**
+ * Outcome of a lockCredits call.
+ *
+ * - `locked`: a hold was placed; `lockId` must be finalized later.
+ * - `denied`: Autumn explicitly answered `allowed: false` (out of quota). The
+ *   caller should refuse the work — this is the only signal that gates usage.
+ * - `unavailable`: Autumn is off, the team is preview, or the API errored. The
+ *   caller should fall back to running without a lock (fail-open).
+ */
+export type LockCreditsResult =
+  | { status: "locked"; lockId: string }
+  | { status: "denied" }
+  | { status: "unavailable" };
+
 export type FinalizeCreditsLockParams = {
   lockId: string;
   action: "confirm" | "release";

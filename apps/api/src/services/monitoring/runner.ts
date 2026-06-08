@@ -70,6 +70,7 @@ const TERMINAL_CHECK_STATUSES = new Set([
   "partial",
   "failed",
   "skipped_overlap",
+  "skipped_quota",
 ]);
 
 async function claimMonitorNotification(checkId: string): Promise<boolean> {
@@ -943,7 +944,7 @@ export async function processMonitorCheckJob(
 
   let lockId: string | null = null;
   try {
-    lockId = await autumnService.lockCredits({
+    const lockResult = await autumnService.lockCredits({
       teamId: monitor.team_id,
       value: check.estimated_credits ?? 1,
       lockId: `monitor_${check.id}`,
@@ -954,6 +955,29 @@ export async function processMonitorCheckJob(
         jobId: check.id,
       },
     });
+
+    // Autumn explicitly says the team is out of quota — skip this check
+    // without scraping or billing. Only an explicit denial gates here;
+    // an unavailable Autumn falls back to running (fail-open).
+    if (lockResult.status === "denied") {
+      check = await updateMonitorCheck(check.id, {
+        status: "skipped_quota",
+        finished_at: new Date().toISOString(),
+        actual_credits: 0,
+        reserved_credits: null,
+        billing_status: "not_applicable",
+        error: "Insufficient credits to run monitor check.",
+      });
+      logger.info("Skipped monitor check due to insufficient credits", {
+        monitorId: monitor.id,
+        checkId: check.id,
+        teamId: monitor.team_id,
+      });
+      await updateMonitorScheduleAfterRun({ monitor, check });
+      return;
+    }
+
+    lockId = lockResult.status === "locked" ? lockResult.lockId : null;
 
     check = await updateMonitorCheck(check.id, {
       autumn_lock_id: lockId,

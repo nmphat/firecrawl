@@ -14,6 +14,7 @@ import type {
   GetEntityParams,
   GetOrCreateCustomerParams,
   LockCreditsParams,
+  LockCreditsResult,
   TrackCreditsParams,
   TrackParams,
 } from "./types";
@@ -383,8 +384,12 @@ export class AutumnService {
   }
 
   /**
-   * Reserves a team's credits in Autumn without letting Autumn gate usage.
-   * Returns the lock ID on success, or null if no lock was acquired.
+   * Reserves a team's credits in Autumn by placing a hold.
+   *
+   * Returns a discriminated {@link LockCreditsResult} so callers can tell an
+   * explicit out-of-quota denial (`allowed: false`) apart from Autumn being
+   * unavailable. Denials are the only outcome that should gate usage; the
+   * `unavailable` case is fail-open so an Autumn outage doesn't halt work.
    */
   async lockCredits({
     teamId,
@@ -392,9 +397,9 @@ export class AutumnService {
     lockId,
     expiresAt,
     properties,
-  }: LockCreditsParams): Promise<string | null> {
+  }: LockCreditsParams): Promise<LockCreditsResult> {
     if (!autumnClient || this.isPreviewTeam(teamId)) {
-      return null;
+      return { status: "unavailable" };
     }
     const resolvedLockId = lockId ?? `billing_${randomUUID()}`;
 
@@ -419,7 +424,7 @@ export class AutumnService {
           value,
           lockId: resolvedLockId,
         });
-        return null;
+        return { status: "denied" };
       }
 
       logger.info("Autumn lockCredits succeeded", {
@@ -430,7 +435,7 @@ export class AutumnService {
         lockId: resolvedLockId,
         properties,
       });
-      return resolvedLockId;
+      return { status: "locked", lockId: resolvedLockId };
     } catch (error) {
       logger.error(
         "Autumn lockCredits failed — billing API may be unavailable, falling back",
@@ -441,7 +446,7 @@ export class AutumnService {
           error,
         },
       );
-      return null;
+      return { status: "unavailable" };
     }
   }
 

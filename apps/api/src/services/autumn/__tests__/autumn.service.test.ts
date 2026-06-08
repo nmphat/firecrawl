@@ -279,21 +279,21 @@ describe("ensureTrackingContext warm-cache short-circuit", () => {
 // ---------------------------------------------------------------------------
 
 describe("lockCredits", () => {
-  it("returns null when autumnClient is null", async () => {
+  it("returns unavailable when autumnClient is null", async () => {
     autumnClientRef = null;
     const svc = makeService();
     const result = await svc.lockCredits({ teamId: "team-1", value: 10 });
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: "unavailable" });
     expect(mockCheck).not.toHaveBeenCalled();
   });
 
-  it("returns null for preview teams", async () => {
+  it("returns unavailable for preview teams", async () => {
     const svc = makeService();
     const result = await svc.lockCredits({
       teamId: "preview_abc",
       value: 10,
     });
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: "unavailable" });
     expect(mockCheck).not.toHaveBeenCalled();
   });
 
@@ -307,7 +307,7 @@ describe("lockCredits", () => {
       properties: { source: "billTeam", endpoint: "extract" },
     });
 
-    expect(result).toBe("lock-123");
+    expect(result).toEqual({ status: "locked", lockId: "lock-123" });
     expect(mockCheck).toHaveBeenCalledWith(
       expect.objectContaining({
         customerId: "org-1",
@@ -323,7 +323,7 @@ describe("lockCredits", () => {
     );
   });
 
-  it("returns null when Autumn denies the lock", async () => {
+  it("returns denied when Autumn denies the lock", async () => {
     mockCheck.mockResolvedValue({
       allowed: false,
       customerId: "org-1",
@@ -335,7 +335,18 @@ describe("lockCredits", () => {
       value: 10,
       lockId: "lock-123",
     });
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: "denied" });
+  });
+
+  it("returns unavailable when the Autumn check throws", async () => {
+    mockCheck.mockRejectedValue(new Error("autumn down"));
+    const svc = makeService();
+    const result = await svc.lockCredits({
+      teamId: "team-1",
+      value: 10,
+      lockId: "lock-123",
+    });
+    expect(result).toEqual({ status: "unavailable" });
   });
 });
 

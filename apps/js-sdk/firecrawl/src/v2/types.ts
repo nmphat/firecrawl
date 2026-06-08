@@ -854,7 +854,8 @@ export interface MonitorCheck {
     | "completed"
     | "failed"
     | "partial"
-    | "skipped_overlap";
+    | "skipped_overlap"
+    | "skipped_quota";
   trigger: "scheduled" | "manual";
   scheduledFor?: string | null;
   startedAt?: string | null;

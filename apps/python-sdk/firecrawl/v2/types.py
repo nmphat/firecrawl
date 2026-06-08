@@ -1084,7 +1084,7 @@ class MonitorCheck(BaseModel):
 
     id: str
     monitor_id: str = Field(alias="monitorId")
-    status: Literal["queued", "running", "completed", "failed", "partial", "skipped_overlap"]
+    status: Literal["queued", "running", "completed", "failed", "partial", "skipped_overlap", "skipped_quota"]
     trigger: Literal["scheduled", "manual"]
     scheduled_for: Optional[str] = Field(default=None, alias="scheduledFor")
     started_at: Optional[str] = Field(default=None, alias="startedAt")
