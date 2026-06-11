@@ -1,0 +1,29 @@
+---
+title: "v2.11.0 is live"
+date: "June 12, 2026"
+description: "Firecrawl v2.11.0 adds PII redaction on scrape, a deterministic JSON extraction format, LLM-judged monitor goals, JSON-mode diffs and snapshots, a Drizzle-based self-host setup, dedicated search credits, and a wide round of SDK, billing, and security fixes."
+---
+
+## v2.11.0 is live
+
+Firecrawl v2.11.0 lands PII redaction directly on scrape, ships a `deterministicJson` format that codegens reusable extractors instead of calling an LLM per request, makes the Monitor API smarter with goal-driven LLM judges and JSON-mode diffs, splits the `searchZDR` forced mode into explicit ZDR and anonymous variants, and migrates self-host deployments from the Supabase SDK to Drizzle on native Postgres. Search billing now meters against its own credit pool, we added a `WWW-Authenticate` header for agent discovery, raised the PDF size cap, added V1-compatible aliases on the V2 SDKs, and patched a fresh batch of CVEs.
+
+### Highlights
+
+- **`redactPII` option** — Set `redactPII: true` on `/v2/scrape`, `/v2/batch/scrape`, `/v2/crawl`, `/v2/parse`, or `/v2/extract` and `document.markdown` comes back with PII redacted. The object form accepts `mode` (`accurate` | `aggressive` | `fast`), an `entities[]` filter, and `replaceStyle` (`tag` | `mask` | `remove`). Costs +4 credits per scrape (plus +4 per extra PDF page) and is exposed across the JS, Python, Java, .NET, Go, PHP, Ruby, Rust, and Elixir SDKs.
+- **`deterministicJson` format** — A new scrape format that codegens a reusable JS extractor for your schema and runs it in a sandbox instead of calling an LLM on every request. Populates `document.json` like the existing `json` format, gets faster and cheaper the more you reuse the same schema, and bills at 7 credits per page.
+- **Monitor goals with LLM judge** — Set `goal` and `judgeEnabled` on a monitor and every changed page is classified as meaningful vs noise, sorted into summary emails with the unified diff rendered inline. Typed in the JS, Python, Java, .NET, Go, PHP, Ruby, Rust, and Elixir SDKs.
+- **Monitor JSON diffs and snapshots** — Monitors using `{type: "json"}` or `{type: "changeTracking", modes: ["json"]}` now diff structured fields against the previous run and persist a `snapshot.json` of current values, surfaced through `GET /v2/monitor/:id/checks/:checkId`.
+- **Mixed-mode change tracking** — Requesting both `["json", "git-diff"]` modes now runs both diffs and reports `changed` if either side changes, with the markdown unified diff attached as a sidecar on the JSON artifact.
+- **Monitor email confirmation** — External monitor recipients now confirm opt-in before they receive alerts and get a one-click unsubscribe link in every summary email; team members are auto-confirmed.
+- **AM/PM monitor schedules** — Daily schedule strings like `daily at 9am` or `daily at 5:30pm` are accepted and converted to the right UTC cron.
+- **Dedicated search credits** — `/v2/search` now meters against its own `SEARCH_CREDITS` pool rather than the shared scrape/crawl/extract `CREDITS` pool. `/v2/team/credit-usage` reports both.
+- **Agent discovery on `401`** — Unauthorized responses now include `WWW-Authenticate: Bearer realm="firecrawl"` so MCP and agent clients can discover the credential scheme programmatically.
+- **`forced-zdr` and `forced-anon` search modes** — `searchZDR: "forced"` has been split into `"forced-zdr"` and `"forced-anon"` to disambiguate ZDR enterprise routing from anonymous routing; `"forced"` continues to work as a deprecated alias.
+- **Self-host Drizzle migration** — The API now runs on Drizzle ORM against native Postgres. Self-host deployments switch from `SUPABASE_*` env vars to `DATABASE_URL`, optional `DATABASE_REPLICA_URL`, and `INDEX_DATABASE_URL`; Stripe auto-recharge is removed in favor of Autumn-driven credit top-ups.
+- **PDF size cap raised to 50 MB** — PDF download and scrape payloads can now be up to 50 MB (up from 30 MB).
+- **V1 aliases on V2 SDKs** — Python and JS V2 clients now expose deprecated `scrape_url` / `scrapeUrl`, `crawl_url` / `crawlUrl`, and friends so V1-trained callers keep working without rewriting code.
+- **JS SDK string API key** — `new Firecrawl("fc-key")` now works alongside the object form, with whitespace-only keys rejected up front.
+- **CVE patches** — Resolved `axios` (GHSA-35jp-ww65-95wh and friends) in the JS SDK, the Rust SDK's `openssl` (CVE-2026-41676), and pnpm-overrode `shell-quote`, `ws`, `brace-expansion`, `qs`, `uuid`, and `js-cookie` across the API, JS SDK, Playwright service, test-suite, and ingestion UI.
+
+Read the full changelog [here](https://github.com/firecrawl/firecrawl/releases/tag/v2.11.0).
