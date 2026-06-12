@@ -5,6 +5,7 @@ import { withSpan, setSpanAttributes } from "../../lib/otel-tracer";
 import { captureExceptionWithZdrCheck } from "../../services/sentry";
 
 import {
+  applyScrapeOptionsDefaults,
   type Document,
   getPDFMaxPages,
   scrapeOptions,
@@ -416,19 +417,13 @@ async function buildMetaObject(
     }
   }
 
+  const effectiveOptions = applyScrapeOptionsDefaults(options);
+
   return {
     id,
     url,
     rewrittenUrl: rewriteUrl(url),
-    options: {
-      ...options,
-      skipTlsVerification:
-        options.skipTlsVerification ??
-        ((options.headers && Object.keys(options.headers).length > 0) ||
-        (options.actions && options.actions.length > 0)
-          ? false
-          : true),
-    },
+    options: effectiveOptions,
     internalOptions,
     logger,
     abortHandle,
@@ -445,7 +440,7 @@ async function buildMetaObject(
           }
         : undefined,
     ),
-    featureFlags: buildFeatureFlags(url, options, internalOptions),
+    featureFlags: buildFeatureFlags(url, effectiveOptions, internalOptions),
     mock:
       options.useMock !== undefined
         ? await loadMock(options.useMock, _logger)
