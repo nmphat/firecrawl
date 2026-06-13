@@ -54,6 +54,13 @@ import {
 import { NuqFdbGroupOps } from "./groups";
 
 const DATA_CHUNK_BYTES = 90 * 1024;
+// FoundationDB caps transactions at 10,000,000 bytes of affected data. Keep
+// enqueue batches much smaller so large payloads cannot accidentally combine
+// into a commit-time transaction_too_large failure.
+const FDB_TRANSACTION_BYTE_LIMIT = 10_000_000;
+const ENQUEUE_BATCH_BYTE_BUDGET = 750 * 1024;
+const ENQUEUE_SINGLE_JOB_BYTE_LIMIT = 8 * 1024 * 1024;
+const ENQUEUE_MAX_JOBS_PER_TRANSACTION = 250;
 
 export { QueueFullError };
 
@@ -97,6 +104,18 @@ export type NuQFdbGate = {
   queueCap: number;
 };
 
+type AddJobInput<Data> = {
+  id: string;
+  data: Data;
+  options: NuQFdbJobOptions;
+};
+
+type PreparedAddJob<Data> = AddJobInput<Data> & {
+  dataBuf: Buffer;
+  dataChunks: Buffer[];
+  estimatedAffectedBytes: number;
+};
+
 function chunkBuffer(buf: Buffer, size: number): Buffer[] {
   const chunks: Buffer[] = [];
   for (let i = 0; i < buf.length; i += size) {
@@ -109,6 +128,10 @@ function externalStatus(s: NuqFdbJobStatus): NuQJobStatusCompat | null {
   if (s === "pending") return "backlog";
   if (s === "cancelled") return null; // cancelled jobs read as gone, like PG row deletes
   return s;
+}
+
+function encodedJsonBytes(v: any): number {
+  return Buffer.byteLength(JSON.stringify(v), "utf8");
 }
 
 export class NuQFdbQueue<JobData = any, JobReturnValue = any> {
@@ -161,7 +184,7 @@ export class NuQFdbQueue<JobData = any, JobReturnValue = any> {
   }
 
   public async addJobs(
-    jobs: Array<{ id: string; data: JobData; options: NuQFdbJobOptions }>,
+    jobs: AddJobInput<JobData>[],
     gate: NuQFdbGate,
     logger: Logger = _logger,
   ): Promise<NuQFdbJob<JobData, JobReturnValue>[]> {
@@ -171,18 +194,154 @@ export class NuQFdbQueue<JobData = any, JobReturnValue = any> {
       throw new Error("addJobs requires all jobs to share an owner");
     }
 
+    const prepared = jobs.map(j => this.prepareAddJob(j, ownerId));
     const results: NuQFdbJob<JobData, JobReturnValue>[] = [];
-    // keep transactions well under the 10MB limit
-    const BATCH = 250;
-    for (let i = 0; i < jobs.length; i += BATCH) {
-      const batch = jobs.slice(i, i + BATCH);
+    let batch: PreparedAddJob<JobData>[] = [];
+    let batchBytes = 0;
+
+    for (const job of prepared) {
+      if (job.estimatedAffectedBytes > ENQUEUE_SINGLE_JOB_BYTE_LIMIT) {
+        throw new Error(
+          `NuQ FDB job ${job.id} is too large to enqueue safely: estimated ${job.estimatedAffectedBytes} bytes of affected data exceeds ${ENQUEUE_SINGLE_JOB_BYTE_LIMIT}`,
+        );
+      }
+
+      if (job.estimatedAffectedBytes > ENQUEUE_BATCH_BYTE_BUDGET) {
+        logger.warn("NuQ FDB enqueue job exceeds batch budget", {
+          canonicalLog: "nuq-fdb/enqueue_batch",
+          queueName: this.queueName,
+          jobId: job.id,
+          estimatedAffectedBytes: job.estimatedAffectedBytes,
+          batchByteBudget: ENQUEUE_BATCH_BYTE_BUDGET,
+          transactionByteLimit: FDB_TRANSACTION_BYTE_LIMIT,
+        });
+      }
+
+      if (
+        batch.length > 0 &&
+        (batchBytes + job.estimatedAffectedBytes > ENQUEUE_BATCH_BYTE_BUDGET ||
+          batch.length >= ENQUEUE_MAX_JOBS_PER_TRANSACTION)
+      ) {
+        results.push(...(await this.addJobsBatch(batch, ownerId, gate)));
+        batch = [];
+        batchBytes = 0;
+      }
+
+      batch.push(job);
+      batchBytes += job.estimatedAffectedBytes;
+    }
+
+    if (batch.length > 0) {
       results.push(...(await this.addJobsBatch(batch, ownerId, gate)));
     }
     return results;
   }
 
+  private prepareAddJob(
+    job: AddJobInput<JobData>,
+    ownerId: string | null,
+  ): PreparedAddJob<JobData> {
+    const dataBuf = Buffer.from(JSON.stringify(job.data ?? null), "utf8");
+    const dataChunks = chunkBuffer(dataBuf, DATA_CHUNK_BYTES);
+    const estimatedAffectedBytes = this.estimateEnqueueAffectedBytes(
+      job,
+      ownerId,
+      dataChunks,
+    );
+    return {
+      ...job,
+      dataBuf,
+      dataChunks,
+      estimatedAffectedBytes,
+    };
+  }
+
+  private estimateEnqueueAffectedBytes(
+    job: AddJobInput<JobData>,
+    ownerId: string | null,
+    dataChunks: Buffer[],
+  ): number {
+    const ks = this.ks;
+    const now = Date.now();
+    const priority = job.options.priority ?? 0;
+    const gid = job.options.groupId;
+    const owner = ownerId ?? "";
+    const entry: QueueEntry = {
+      i: job.id,
+      o: owner,
+      g: gid,
+      p: priority,
+      f: F_GATED | F_CRAWL_GATED | F_LISTENABLE | F_ZDR | F_COUNTABLE | F_GACC,
+      c: now,
+      to: job.options.timesOutAt?.getTime(),
+    };
+    const meta: JobMeta = {
+      c: now,
+      p: priority,
+      o: owner,
+      g: gid,
+      f: entry.f,
+      to: entry.to,
+      dc: dataChunks.length,
+    };
+
+    let bytes =
+      ks.jobMeta(job.id).length +
+      encodedJsonBytes(meta) +
+      ks.jobStatus(job.id).length +
+      encodedJsonBytes({ s: "pending", st: 0 }) +
+      ks.readyPrefix(READY_SHARDS - 1, priority).length +
+      encodedJsonBytes(entry) +
+      ks.readyShardCount(READY_SHARDS - 1).length +
+      8;
+
+    for (let i = 0; i < dataChunks.length; i++) {
+      bytes += ks.jobData(job.id, i).length + dataChunks[i].length;
+    }
+
+    if (owner) {
+      bytes +=
+        ks.teamLimit(owner).length +
+        8 +
+        ks.teamActive(owner).length +
+        8 +
+        ks.teamPendingCount(owner).length +
+        8 +
+        ks.teamShardCount(owner, 0).length +
+        8 +
+        ks.teamPendingKey(owner, 0, priority, now, job.id).length +
+        encodedJsonBytes(entry);
+    }
+
+    if (gid) {
+      bytes +=
+        ks.groupMeta(gid).length +
+        ks.groupRemaining(gid).length +
+        8 +
+        ks.groupCrawlActive(gid).length +
+        8 +
+        ks.groupStatusCount(gid, "pending").length +
+        8 +
+        ks.groupPendingCount(gid).length +
+        8 +
+        ks.groupPendingKey(gid, priority, now, job.id).length +
+        encodedJsonBytes(entry) +
+        ks.groupJob(gid, job.id).length +
+        encodedJsonBytes({ m: 1, s: "pending" });
+    }
+
+    if (entry.to !== undefined) {
+      bytes += ks.backlogTimeout(timeBucket(job.id), entry.to, job.id).length;
+    }
+
+    // Account for versionstamp suffixes, conflict ranges, tuple overhead, and
+    // status loc variants. This intentionally overestimates so the batching
+    // boundary stays conservative as placement changes inside the transaction.
+    return bytes + 4096;
+  }
+
   private async addJobsBatch(
-    jobs: Array<{ id: string; data: JobData; options: NuQFdbJobOptions }>,
+    jobs: PreparedAddJob<JobData>[],
     ownerId: string | null,
     gate: NuQFdbGate,
   ): Promise<NuQFdbJob<JobData, JobReturnValue>[]> {
@@ -271,8 +430,6 @@ export class NuQFdbQueue<JobData = any, JobReturnValue = any> {
           to: timesOutAt,
         };
 
-        const dataBuf = Buffer.from(JSON.stringify(j.data ?? null), "utf8");
-        const chunks = chunkBuffer(dataBuf, DATA_CHUNK_BYTES);
         const meta: JobMeta = {
           c: now,
           p: entry.p,
@@ -280,10 +437,12 @@ export class NuQFdbQueue<JobData = any, JobReturnValue = any> {
           g: gid,
           f: flags,
           to: timesOutAt,
-          dc: chunks.length,
+          dc: j.dataChunks.length,
         };
         tn.set(ks.jobMeta(j.id), encodeJson(meta));
-        chunks.forEach((chunk, ci) => tn.set(ks.jobData(j.id, ci), chunk));
+        j.dataChunks.forEach((chunk, ci) =>
+          tn.set(ks.jobData(j.id, ci), chunk),
+        );
 
         let placedStatus: NuqFdbJobStatus;
         if (!gated) {
