@@ -1,0 +1,14 @@
+# Port override + restart policy
+services:
+  api:
+    ports:
+      - "3092:3002"
+    restart: unless-stopped
+  playwright-service:
+    restart: unless-stopped
+  redis:
+    restart: unless-stopped
+  rabbitmq:
+    restart: unless-stopped
+  nuq-postgres:
+    restart: unless-stopped
