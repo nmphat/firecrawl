@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
-import { chromium, Browser, BrowserContext, Route, Request as PlaywrightRequest, Page } from 'playwright';
+import { launch } from 'cloakbrowser';
+import type { Browser, BrowserContext, Route, Request as PlaywrightRequest, Page } from 'playwright-core';
 import dotenv from 'dotenv';
 import UserAgent from 'user-agents';
 import { getError } from './helpers/get_error';
@@ -183,7 +184,7 @@ interface UrlModel {
 let browser: Browser;
 
 const initializeBrowser = async () => {
-  browser = await chromium.launch({
+  browser = await launch({
     headless: true,
     args: [
       '--no-sandbox',
@@ -471,11 +472,10 @@ app.listen(port, () => {
   });
 });
 
-if (require.main === module) {
-  process.on('SIGINT', () => {
-    shutdownBrowser().then(() => {
-      console.log('Browser closed');
-      process.exit(0);
-    });
+// ESM: always register SIGINT handler
+process.on('SIGINT', () => {
+  shutdownBrowser().then(() => {
+    console.log('Browser closed');
+    process.exit(0);
   });
-}
+});
