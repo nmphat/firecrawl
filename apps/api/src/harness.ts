@@ -895,17 +895,20 @@ async function startServices(command?: string[]): Promise<Services> {
           },
         );
 
-  const nuqReconcilerWorker = execForward(
-    "nuq-reconciler",
-    process.argv[2] === "--start-docker"
-      ? "node dist/src/services/worker/nuq-reconciler-worker.js"
-      : "pnpm nuq-reconciler-worker:production",
-    {
-      NUQ_RECONCILER_WORKER_PORT: String(NUQ_RECONCILER_WORKER_PORT),
-      NUQ_REDUCE_NOISE: "true",
-      NUQ_POD_NAME: "nuq-reconciler-worker-0",
-    },
-  );
+  const nuqReconcilerWorker =
+    config.NUQ_BACKEND === "fdb"
+      ? undefined
+      : execForward(
+          "nuq-reconciler",
+          process.argv[2] === "--start-docker"
+            ? "node dist/src/services/worker/nuq-reconciler-worker.js"
+            : "pnpm nuq-reconciler-worker:production",
+          {
+            NUQ_RECONCILER_WORKER_PORT: String(NUQ_RECONCILER_WORKER_PORT),
+            NUQ_REDUCE_NOISE: "true",
+            NUQ_POD_NAME: "nuq-reconciler-worker-0",
+          },
+        );
 
   const indexWorker = config.USE_DB_AUTHENTICATION
     ? execForward(

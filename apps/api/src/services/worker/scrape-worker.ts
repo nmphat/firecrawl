@@ -520,6 +520,9 @@ async function processJob(job: NuQJob<ScrapeJobSingleUrls>) {
               [doc.metadata.url ?? doc.metadata.sourceURL!],
               1,
               sc.crawlerOptions?.maxDepth ?? 10,
+              false,
+              false,
+              true,
             );
             if (filterResult.links.length === 0) {
               const url = doc.metadata.url ?? doc.metadata.sourceURL!;
