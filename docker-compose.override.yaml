@@ -1,11 +1,21 @@
-# Port override + restart policy
+# Host-specific settings. docker-compose.yaml itself is left as upstream ships
+# it so the images still build from source on a fresh machine.
 services:
   api:
-    ports:
-      - "3092:3002"
     restart: unless-stopped
+    # Upstream asks for 4 CPUs; this box has 2, and docker refuses to create the
+    # container at all rather than clamping.
+    cpus: 1.5
+    mem_limit: 4G
+    memswap_limit: 4G
+    # SearXNG runs in its own compose project, so it is not on this network.
+    # Reach it back through the host instead.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
   playwright-service:
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 2G
   redis:
     restart: unless-stopped
   rabbitmq:
